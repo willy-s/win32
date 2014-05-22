@@ -68,6 +68,7 @@ import System.Win32.Types
 
 import Foreign
 import Control.Monad (liftM)
+import Data.Bits (testBit)
 
 ##include "windows_cconv.h"
 
@@ -417,12 +418,15 @@ setMenuItemInfo menu item bypos mask info =
 foreign import WINDOWS_CCONV unsafe "windows.h SetMenuItemInfoW"
   c_SetMenuItemInfo :: HMENU -> UINT -> Bool -> Ptr MenuItemInfo -> IO Bool
 
-trackPopupMenu :: HMENU -> TrackMenuFlag -> Int -> Int -> HWND -> RECT -> IO ()
-trackPopupMenu menu flags x y wnd rect =
-  withRECT rect $ \ p_rect ->
-  failIfFalse_ "TrackPopupMenu" $ c_TrackPopupMenu menu flags x y 0 wnd p_rect
-foreign import WINDOWS_CCONV unsafe "windows.h TrackPopupMenu"
-  c_TrackPopupMenu :: HMENU -> TrackMenuFlag -> Int -> Int -> Int -> HWND -> LPRECT -> IO Bool
+trackPopupMenu :: HMENU -> TrackMenuFlag -> Int -> Int -> HWND -> RECT -> IO (Maybe MenuID)
+trackPopupMenu menu flags x y wnd rect = do
+  uint <-withRECT rect $ \ p_rect ->
+    c_TrackPopupMenu menu flags x y 0 wnd p_rect
+  case uint of 0 -> fail "TrackPopupMenu"
+               x | testBit flags 2 -> return $ Just x
+               _ -> return $ Nothing  
+foreign import WINDOWS_CCONV safe "windows.h TrackPopupMenu"
+  c_TrackPopupMenu :: HMENU -> TrackMenuFlag -> Int -> Int -> Int -> HWND -> LPRECT -> IO UINT
 
 type TPMPARAMS = ()
 
@@ -434,12 +438,15 @@ withTPMPARAMS p_rect f =
   copyBytes (#{ptr TPMPARAMS,rcExclude} p) p_rect size
   f p
 
-trackPopupMenuEx :: HMENU -> TrackMenuFlag -> Int -> Int -> HWND -> Maybe (Ptr RECT) -> IO ()
-trackPopupMenuEx menu flags x y wnd mb_p_rect =
-  maybeWith withTPMPARAMS mb_p_rect $ \ p_ptmp ->
-  failIfFalse_ "TrackPopupMenuEx" $ c_TrackPopupMenuEx menu flags x y wnd p_ptmp
-foreign import WINDOWS_CCONV unsafe "windows.h TrackPopupMenuEx"
-  c_TrackPopupMenuEx :: HMENU -> TrackMenuFlag -> Int -> Int -> HWND -> Ptr TPMPARAMS -> IO Bool
+trackPopupMenuEx :: HMENU -> TrackMenuFlag -> Int -> Int -> HWND -> Maybe (Ptr RECT) -> IO (Maybe MenuID)
+trackPopupMenuEx menu flags x y wnd mb_p_rect = do
+  uint <-maybeWith withTPMPARAMS mb_p_rect $ \ p_ptmp ->
+    c_TrackPopupMenuEx menu flags x y wnd p_ptmp
+  case uint of 0 -> fail "TrackPopupMenuEx"
+               x | testBit flags 2 -> return $ Just x
+               _ -> return Nothing
+foreign import WINDOWS_CCONV safe "windows.h TrackPopupMenuEx"
+  c_TrackPopupMenuEx :: HMENU -> TrackMenuFlag -> Int -> Int -> HWND -> Ptr TPMPARAMS -> IO UINT
 
 -- Note: these 3 assume the flags don't include MF_BITMAP or MF_OWNERDRAW
 -- (which are hidden by this interface)
